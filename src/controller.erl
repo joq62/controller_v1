@@ -199,7 +199,7 @@ handle_call({all_nodes},_From, State) ->
 handle_call({heart_beat},_,State) ->
     DnsInfo=State#state.dns_info,
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
-    if_dns:cast("dns",latest,{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort}), 
+    if_dns:cast("dns",{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort}), 
     Now=erlang:now(),
     NewNodeList=[KubeletInfo||KubeletInfo<-State#state.node_list,
 		      (timer:now_diff(Now,KubeletInfo#kubelet_info.time_stamp)/1000)<?INACITIVITY_TIMEOUT],
