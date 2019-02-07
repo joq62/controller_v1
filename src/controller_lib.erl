@@ -232,7 +232,7 @@ start_services([],_GitUrl,_Nodes,_,StartResult)->
 start_services([{{ServiceId},NumInstances}|T],GitUrl,Nodes,State,Acc)->
     GitService=GitUrl++?JOSCA++".git",
     os:cmd("git clone "++GitService),
-    FileName=filename:join([?JOSCA,ServiceId,ServiceId++".josca"]),
+    FileName=filename:join([?JOSCA,ServiceId++".josca"]),
     case file:consult(FileName) of
 	{error,Err}->
 	    NewAcc=[{error,Err}|Acc],

@@ -17,6 +17,7 @@
 -include("include/dns_data.hrl").
 -include("include/data.hrl").
 -include("include/kubelet_data.hrl").
+-include("include/loader.hrl").
 %% --------------------------------------------------------------------
 
 
@@ -104,11 +105,12 @@ de_node_register(KubeletInfo)->
 %%
 %% --------------------------------------------------------------------
 init([]) ->
-     {ok,MyIp}=application:get_env(ip_addr),
+    {ok,MyIp}=application:get_env(ip_addr),
     {ok,Port}=application:get_env(port),
     {ok,ServiceId}=application:get_env(service_id),
     {ok,DnsIp}=application:get_env(dns_ip_addr),
     {ok,DnsPort}=application:get_env(dns_port),
+    {ok,GitUrl}=application:get_env(git_url),
      DnsInfo=#dns_info{time_stamp="not_initiaded_time_stamp",
 			service_id = ServiceId,
 			ip_addr=MyIp,
@@ -117,7 +119,8 @@ init([]) ->
     spawn(fun()-> local_heart_beat(?HEARTBEAT_INTERVAL) end), 
     spawn(fun()-> do_campaign(?HEARTBEAT_INTERVAL) end),    
     io:format("Started Service  ~p~n",[{?MODULE}]),
-    {ok, #state{dns_list=[],node_list=[],application_list=[],
+    {ok, #state{git_url=GitUrl,
+		dns_list=[],node_list=[],application_list=[],
 		dns_info=DnsInfo,dns_addr={dns,DnsIp,DnsPort}}}.  
     
 %% --------------------------------------------------------------------
@@ -132,15 +135,18 @@ init([]) ->
 %% --------------------------------------------------------------------
 handle_call({add,AppId,Vsn}, _From, State) ->
     io:format(" Add new application ~p~n",[{?MODULE,?LINE,time(),add,AppId,Vsn}]),
-    {dns,DnsIp,DnsPort}=State#state.dns_addr,
     Reply=case lists:keyfind({AppId,Vsn},1,State#state.application_list) of
 	      false->
-		  case if_dns:call("catalog",latest,{catalog,read,[AppId,Vsn]},{DnsIp,DnsPort}) of
+		  GitUrl=State#state.git_url,
+		  GitJosca=GitUrl++?JOSCA++".git",
+		  os:cmd("git clone "++GitJosca),
+		  FileName=filename:join(?JOSCA,AppId++".josca"),
+		  case file:consult(FileName) of
 		      {error,Err}->
 			  NewState=State,
 			  io:format(" Error  ~p~n",[{?MODULE,?LINE,time(),Err}]),
 			  {error,[?MODULE,?LINE,AppId,Vsn,Err]};
-		      {ok,_,JoscaInfo}->
+		      {ok,JoscaInfo}->
 			  NewAppList=[{{AppId,Vsn},JoscaInfo}|State#state.application_list],
 			  NewState=State#state{application_list=NewAppList},
 			  ok;
@@ -170,7 +176,7 @@ handle_call({remove,AppId,Vsn}, _From, State)->
 						   false==lists:member({X_ServiceId,X_Vsn},AllServices)],
 		  % DNS holds all information about services 
 		  {dns,DnsIp,DnsPort}=State#state.dns_addr,
-		  AvailableServices=if_dns:call("dns",latest,{dns,get_all_instances,[]},{DnsIp,DnsPort}),
+		  AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
 		  NewDnsList=rpc:call(node(),controller_lib,stop_services,[ServicesToStop,AvailableServices,State]),
 		  NewState=State#state{application_list=NewAppList,dns_list=NewDnsList},
 		  ok
