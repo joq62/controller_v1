@@ -103,11 +103,11 @@ dependencies(I)->
 %% --------------------------------------------------------------------------
 
 
-start_order(Name,GitUrl,State)->
-  %  io:format("~p~n",[{?MODULE,?LINE,Name,Vsn}]),
+start_order(Name,State)->
+    GitUrl=State#state.git_url,
     GitService=GitUrl++?JOSCA++".git",
     os:cmd("git clone "++GitService),
-    FileName=filename:join([?JOSCA,Name,Name++".josca"]),
+    FileName=filename:join([?JOSCA,Name++".josca"]),
     Result=case file:consult(FileName) of
 	       {error,Err}->
 		   {error,[?MODULE,?LINE,Err]};
@@ -116,12 +116,12 @@ start_order(Name,GitUrl,State)->
 			   {type,application}->
 			       [];
 			   {type,service} ->
-			       {exported_services,[{ServiceId}]}=lists:keyfind(exported_services,1,JoscaInfo),
+			       {exported_services,[{ServiceId,Vsn}]}=lists:keyfind(exported_services,1,JoscaInfo),
 			       [{ServiceId}]
 		       end,
 						% io:format("~p~n",[{?MODULE,?LINE,Acc}]),
 		   {dependencies,JoscaFiles}=lists:keyfind(dependencies,1,JoscaInfo),
-		  % io:format("~p~n",[{?MODULE,?LINE,JoscaFiles}]),
+		   %io:format("~p~n",[{?MODULE,?LINE,JoscaFiles}]),
 		   dfs(JoscaFiles,Acc,State);
 	       Err ->
 		   {error,[?MODULE,?LINE,Err]}
@@ -132,8 +132,7 @@ start_order(Name,GitUrl,State)->
 dfs([],Acc,_)->
     Acc;
 dfs([{Name,Vsn}|T],Acc,State)->
-    io:format("~p~n",[{?MODULE,?LINE,Name,Vsn,Acc}]),
-    FileName=filename:join([?JOSCA,Name,Name++".josca"]),
+    FileName=filename:join([?JOSCA,Name++".josca"]),
     case file:consult(FileName) of
 	{error,Err}->
 	    JoscaFiles=[],
@@ -150,7 +149,7 @@ dfs([{Name,Vsn}|T],Acc,State)->
 	    {dependencies,JoscaFiles}=lists:keyfind(dependencies,1,JoscaInfo)
     end,
     Acc2=dfs(JoscaFiles,Acc1,State),
-    io:format("~p~n",[{?MODULE,?LINE,Acc2}]),
+    %io:format("~p~n",[{?MODULE,?LINE,Acc2}]),
     dfs(T,Acc2,State).
 
 %%-----------------------------------------------------------------------------

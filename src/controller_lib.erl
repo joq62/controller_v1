@@ -91,21 +91,26 @@ nice_print([AvailableServices,NeededServices,ServicesToStart,SurplusServices,Nod
 %% Returns: non
 %% --------------------------------------------------------------------
 campaign(State)->
+  %  io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
     NeededServices=controller_lib:needed_services(State#state.application_list,State),
+%    io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
-   AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
-    
+    AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
+ %   io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,time(),AvailableServices}]),
     ServicesToStart=controller_lib:services_to_start(NeededServices,AvailableServices,?WANTED_NUM_INSTANCES),
+  %  io:format(" ServicesToStart  ~p~n",[{?MODULE,?LINE,time(),ServicesToStart}]),
     case ServicesToStart of
 	[]->
 	    _StartResult=ok;
 	ServicesToStart->
-	    _StartResult=controller_lib:start_services(ServicesToStart,State#state.node_list,State,[])
+	    StartResult=controller_lib:start_services(ServicesToStart,State,[])
+%	    io:format(" StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}])
     end,
     
     %keep system services repo, catalog, controller
-    L1=keep_system_services(["repo","controller","catalog"],AvailableServices),
+    L1=keep_system_services(["dns","controller"],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
+ %   io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,time(),SurplusServices}]),
     _StopResult=controller_lib:stop_services(SurplusServices,AvailableServices,State),
     controller_lib:nice_print([AvailableServices,NeededServices,ServicesToStart,SurplusServices,State#state.node_list]),
     ok.
@@ -164,7 +169,10 @@ stop_services([{ServiceId}|T],DnsList,State)->
     ListWithIp=[{DnsInfo#dns_info.ip_addr,DnsInfo#dns_info.port,
 		 DnsInfo#dns_info.service_id,DnsInfo}||DnsInfo<-DnsList,
 						       {ServiceId}=:={DnsInfo#dns_info.service_id}],
-    [tcp:test_call([{X_IpAddr,X_Port}],{kubelet,stop_service,[X_ServiceId]})||{X_IpAddr,X_Port,X_ServiceId,_DnsInfo}<-ListWithIp],
+      {dns,DnsIp,DnsPort}=State#state.dns_addr,
+    [{if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
+      tcp:test_call([{X_IpAddr,X_Port}],{kubelet,stop_service,[X_ServiceId]})}||{X_IpAddr,X_Port,X_ServiceId,DnsInfo}<-ListWithIp],
+    
     
     NewDnsList=[Y_DnsInfo||Y_DnsInfo<-DnsList,
 					   false==({ServiceId}=:={Y_DnsInfo#dns_info.service_id})],
@@ -176,24 +184,28 @@ stop_services([{ServiceId}|T],DnsList,State)->
 %% Returns: non
 %% --------------------------------------------------------------------
 needed_services(ApplicationList,State)->
+  %  io:format(" ApplicationList  ~p~n",[{?MODULE,?LINE,time(),ApplicationList}]),
     needed_services(ApplicationList,State,[]).
 
 needed_services([],_,NeededServices)->
+   % io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
     NeededServices;
-needed_services([{{_AppId,_vsn},JoscaFile}|T],State,Acc)->
+needed_services([{{AppId,Vsn},JoscaFile}|T],State,Acc)->
+  %  io:format(" {{AppId,vsn},JoscaFile}  ~p~n",[{?MODULE,?LINE,time(),{{AppId,Vsn},JoscaFile}}]),
     {dependencies,ServiceList}=lists:keyfind(dependencies,1,JoscaFile),
     NewAcc=check_services(ServiceList,State,Acc),
+   % io:format(" NewAcc  ~p~n",[{?MODULE,?LINE,time(),NewAcc}]),
     needed_services(T,State,NewAcc).
 
 check_services([],_,Acc)->
     Acc;
-check_services([{Id,Vsn}|T],State,Acc) ->
-    NewAcc=case josca:start_order(Id,Vsn,State) of
+check_services([{Id,_Vsn}|T],State,Acc) ->
+    NewAcc=case josca:start_order(Id,State) of
 	       {error,Err}->
 		   io:format("error~p~n",[{?MODULE,?LINE,Err}]),
 		   Acc;
 	       Services ->
-		   case lists:member({Id,Vsn},Acc) of
+		   case lists:member({Id},Acc) of
 		       true->
 			   Acc;
 		       false->
@@ -227,12 +239,14 @@ missing_services(NeededServices,DnsList)->
 %% Returns: non
 %% --------------------------------------------------------------------
 
-start_services([],_GitUrl,_Nodes,_,StartResult)->
+start_services([],_,StartResult)->
     StartResult;
-start_services([{{ServiceId},NumInstances}|T],GitUrl,Nodes,State,Acc)->
-    GitService=GitUrl++?JOSCA++".git",
+start_services([{{ServiceId},NumInstances}|T],State,Acc)->
+  %  io:format(" ServiceId,Nodes  ~p~n",[{?MODULE,?LINE,time(),ServiceId}]),
+    GitService=State#state.git_url++?JOSCA++".git",
     os:cmd("git clone "++GitService),
     FileName=filename:join([?JOSCA,ServiceId++".josca"]),
+   % io:format(" FileName  ~p~n",[{?MODULE,?LINE,time(),FileName}]),
     case file:consult(FileName) of
 	{error,Err}->
 	    NewAcc=[{error,Err}|Acc],
@@ -241,7 +255,7 @@ start_services([{{ServiceId},NumInstances}|T],GitUrl,Nodes,State,Acc)->
 	{ok,JoscaInfo}->
 	    {zone,WantedZone}=lists:keyfind(zone,1,JoscaInfo),
 	    {needed_capabilities,WantedCapabilities}=lists:keyfind(needed_capabilities,1,JoscaInfo),
-	    NodesFullfilledNeeds=get_nodes_fullfills_needs(WantedZone,WantedCapabilities,Nodes),
+	    NodesFullfilledNeeds=get_nodes_fullfills_needs(WantedZone,WantedCapabilities,State#state.node_list),
 	    case NodesFullfilledNeeds of
 		[]->
 		    NewAcc=[{error,['error no availible nodes',ServiceId]}|Acc];
@@ -255,7 +269,7 @@ start_services([{{ServiceId},NumInstances}|T],GitUrl,Nodes,State,Acc)->
 	     {error,[?MODULE,?LINE,Err]}
 	    
     end,
-    start_services(T,GitUrl,Nodes,State,NewAcc).
+    start_services(T,State,NewAcc).
 
 %% --------------------------------------------------------------------
 %% Function: 
