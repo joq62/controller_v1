@@ -110,7 +110,7 @@ start_order(Name,State)->
     FileName=filename:join([?JOSCA,Name++".josca"]),
     Result=case file:consult(FileName) of
 	       {error,Err}->
-		   {error,[?MODULE,?LINE,Err]};
+		   {error,[?MODULE,?LINE,Err,FileName]};
 	       {ok,JoscaInfo}->
 		   Acc=case lists:keyfind(type,1,JoscaInfo) of 
 			   {type,application}->

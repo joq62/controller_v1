@@ -164,16 +164,25 @@ handle_call({add,AppId,Vsn}, _From, State) ->
     {reply, Reply,NewState};
 
 handle_call({remove,AppId,Vsn}, _From, State)->
+    io:format("  ~p~n",[{?MODULE,?LINE,time(),remove,AppId,Vsn}]),
     Reply=case lists:keyfind({AppId,Vsn},1,State#state.application_list) of
 	      false ->
 		  NewState=State,
 		  {error,[?MODULE,?LINE,'eexists',AppId,Vsn]};
 	      {{AppId,Vsn},JoscaInfo}->
+    % Remove the josca spec for the application from the list of active applications
 		  NewAppList=lists:keydelete({AppId,Vsn},1,State#state.application_list),
+%		  io:format(" NewAppList  ~p~n",[{?MODULE,?LINE,NewAppList}]),
+    % Get services that needs to be left
 		  AllServices=rpc:call(node(),controller_lib,needed_services,[NewAppList,State]),
+%		  io:format(" AllServices  ~p~n",[{?MODULE,?LINE,AllServices}]),
+
+    % Get which services that the application that will be removed used
 		  AppIdServices=rpc:call(node(),controller_lib,needed_services,[[{{AppId,Vsn},JoscaInfo}],State]),
-		  ServicesToStop=[{X_ServiceId,X_Vsn}||{X_ServiceId,X_Vsn}<-AppIdServices,
-						   false==lists:member({X_ServiceId,X_Vsn},AllServices)],
+%		  io:format(" AppIdServices  ~p~n",[{?MODULE,?LINE,AppIdServices}]),
+		  ServicesToStop=[{X_ServiceId}||{X_ServiceId}<-AppIdServices,
+						 false==lists:member({X_ServiceId},AllServices)],
+%		  io:format(" ServicesToStop  ~p~n",[{?MODULE,?LINE,ServicesToStop}]),
 		  % DNS holds all information about services 
 		  {dns,DnsIp,DnsPort}=State#state.dns_addr,
 		  AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),

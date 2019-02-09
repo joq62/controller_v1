@@ -171,13 +171,22 @@ stop_services([{ServiceId}|T],DnsList,State)->
 						       {ServiceId}=:={DnsInfo#dns_info.service_id}],
   %  io:format(" stop_services ListWithIp  ~p~n",[{?MODULE,?LINE,time(),ListWithIp}]),
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
-    [{if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
-      tcp:test_call([{X_IpAddr,X_Port}],{kubelet,stop_service,[X_ServiceId]})}||{X_IpAddr,X_Port,X_ServiceId,DnsInfo}<-ListWithIp],
-    
-    
+  %  [{if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
+   %   tcp:test_call([{X_IpAddr,X_Port}],{kubelet,stop_service,[X_ServiceId]})}||{X_IpAddr,X_Port,X_ServiceId,DnsInfo}<-ListWithIp],
+
+    _StopResult=do_stop(ListWithIp,{DnsIp,DnsPort},[]),
     NewDnsList=[Y_DnsInfo||Y_DnsInfo<-DnsList,
-					   false==({ServiceId}=:={Y_DnsInfo#dns_info.service_id})],
+			   false==({ServiceId}=:={Y_DnsInfo#dns_info.service_id})],
     stop_services(T,NewDnsList,State).
+
+do_stop([],_,StopResult)->
+    StopResult;
+do_stop([{IpAddr,Port,ServiceId,DnsInfo}|T],{DnsIp,DnsPort},Acc)->
+    Stop=tcp:test_call([{IpAddr,Port}],{kubelet,stop_service,[ServiceId]}),
+    Cast=if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
+    NewAcc=[{ServiceId,{IpAddr,Port},Stop,Cast}|Acc],
+    do_stop(T,{DnsIp,DnsPort},NewAcc).
+    
 						  
 %% --------------------------------------------------------------------
 %% Function: 
