@@ -91,15 +91,15 @@ nice_print([AvailableServices,NeededServices,ServicesToStart,SurplusServices,Nod
 %% Returns: non
 %% --------------------------------------------------------------------
 campaign(State)->
-  %  io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
+%    io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
     NeededServices=controller_lib:needed_services(State#state.application_list,State),
-%    io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
+ %   io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
     AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
  %   io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,time(),AvailableServices}]),
     ServicesToStart=controller_lib:services_to_start(NeededServices,AvailableServices,?WANTED_NUM_INSTANCES),
-  %  io:format(" ServicesToStart  ~p~n",[{?MODULE,?LINE,time(),ServicesToStart}]),
-    case ServicesToStart of
+ %   io:format(" ServicesToStart  ~p~n",[{?MODULE,?LINE,time(),ServicesToStart}]),
+   case ServicesToStart of
 	[]->
 	    _StartResult=ok;
 	ServicesToStart->
@@ -169,7 +169,8 @@ stop_services([{ServiceId}|T],DnsList,State)->
     ListWithIp=[{DnsInfo#dns_info.ip_addr,DnsInfo#dns_info.port,
 		 DnsInfo#dns_info.service_id,DnsInfo}||DnsInfo<-DnsList,
 						       {ServiceId}=:={DnsInfo#dns_info.service_id}],
-      {dns,DnsIp,DnsPort}=State#state.dns_addr,
+  %  io:format(" stop_services ListWithIp  ~p~n",[{?MODULE,?LINE,time(),ListWithIp}]),
+    {dns,DnsIp,DnsPort}=State#state.dns_addr,
     [{if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
       tcp:test_call([{X_IpAddr,X_Port}],{kubelet,stop_service,[X_ServiceId]})}||{X_IpAddr,X_Port,X_ServiceId,DnsInfo}<-ListWithIp],
     
@@ -225,6 +226,7 @@ calc_to_start([{Id}|T],AvailibleServices,WantedNumInstances,Acc) ->
     L1=[{Id}||{A_ServiceId}<-AvailibleServices,
 		  true==({A_ServiceId}=:={Id})],
     NumToStart=WantedNumInstances-lists:flatlength(L1),
+  %  io:format(" NumToStart, L1  ~p~n",[{?MODULE,?LINE,time(),NumToStart,L1}]),
     NewAcc=[{{Id},NumToStart}|Acc],
     calc_to_start(T,AvailibleServices,WantedNumInstances,NewAcc).
 
@@ -260,6 +262,7 @@ start_services([{{ServiceId},NumInstances}|T],State,Acc)->
 		[]->
 		    NewAcc=[{error,['error no availible nodes',ServiceId]}|Acc];
 		NodesFullfilledNeeds->
+%		    io:format(" NumInstances  ~p~n",[{?MODULE,?LINE,time(),NumInstances}]),
 		    R=schedule_start(ServiceId,NodesFullfilledNeeds,NumInstances),
 		    NewAcc=[R|Acc]
 	    end;
@@ -295,12 +298,15 @@ do_start([KubeleteInfo|T],NumInstances,ServicesId,Acc)->
     IpAddr=KubeleteInfo#kubelet_info.ip_addr,
     Port=KubeleteInfo#kubelet_info.port,
     StartResult=tcp:test_call([{IpAddr,Port}],{kubelet,start_service,[ServicesId]}),
+ %   io:format(" StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}]),
     case StartResult of
-       {error,_}->
+       {error,Err}->
+	    io:format(" ~p~n",[{?MODULE,?LINE,time(),{error,Err}}]),
 	    NewNumInstances=NumInstances;
 	_->
 	    NewNumInstances=NumInstances-1
     end,
+  %  io:format(" NewNumInstances  ~p~n",[{?MODULE,?LINE,time(),NewNumInstances}]),
     NewAcc=[StartResult|Acc],
     do_start(T,NewNumInstances,ServicesId,NewAcc).
 
