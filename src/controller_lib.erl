@@ -35,7 +35,7 @@
 %% Description:
 %% Returns: non
 %% --------------------------------------------------------------------
-nice_print([AvailableServices,NeededServices,ServicesToStart,SurplusServices,Nodes])->
+nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,Nodes])->
     % Availible services dns info  ServiceId, Vsn , IpAddr , Port
   %  io:format("Nice print:AvailableServices ~n"),
     
@@ -67,12 +67,13 @@ nice_print([AvailableServices,NeededServices,ServicesToStart,SurplusServices,Nod
 	    io:format("Needed services ~p~n",[NeededServices])
     end,
    io:format("~n"),
-   case ServicesToStart of
+   case StartResult of
 	[]->
 	    io:format("No services to start ~n");
 	_->
-	   L3=[{ServiceId,Vsn,Num}||{{ServiceId,Vsn},Num}<-ServicesToStart,false==(Num=:=0)],
-	   io:format("Services to start ~p~n",[L3])
+	   io:format("Services to start ~p~n",[{StartResult}])
+	  % L3=[{ServiceId,Vsn,Num}||{{ServiceId,Vsn},Num}<-ServicesToStart,false==(Num=:=0)],
+	  % io:format("Services to start ~p~n",[L3])
     end,
     io:format("~n"),
    case SurplusServices of
@@ -94,25 +95,20 @@ campaign(State)->
 %    io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
     NeededServices=controller_lib:needed_services(State#state.application_list,State),
  %   io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
-    {dns,DnsIp,DnsPort}=State#state.dns_addr,
-    AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
+ 
  %   io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,time(),AvailableServices}]),
-    ServicesToStart=controller_lib:services_to_start(NeededServices,AvailableServices,?WANTED_NUM_INSTANCES),
- %   io:format(" ServicesToStart  ~p~n",[{?MODULE,?LINE,time(),ServicesToStart}]),
-   case ServicesToStart of
-	[]->
-	    _StartResult=ok;
-	ServicesToStart->
-	    StartResult=controller_lib:start_services(ServicesToStart,State,[])
-%	    io:format(" StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}])
-    end,
-    
+
+    StartResult=controller_lib:load_start_services(NeededServices,?WANTED_NUM_INSTANCES,State),
+ %   io:format("StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}]),
+
     %keep system services repo, catalog, controller
+    {dns,DnsIp,DnsPort}=State#state.dns_addr,
+    AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}), 
     L1=keep_system_services(["dns","controller"],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
  %   io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,time(),SurplusServices}]),
     _StopResult=controller_lib:stop_services(SurplusServices,AvailableServices,State),
-    controller_lib:nice_print([AvailableServices,NeededServices,ServicesToStart,SurplusServices,State#state.node_list]),
+    controller_lib:nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,State#state.node_list]),
     ok.
 
 keep_system_services([],WorkerService)->
@@ -200,7 +196,7 @@ needed_services(ApplicationList,State)->
 needed_services([],_,NeededServices)->
    % io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
     NeededServices;
-needed_services([{{AppId,Vsn},JoscaFile}|T],State,Acc)->
+needed_services([{{_AppId,_Vsn},JoscaFile}|T],State,Acc)->
   %  io:format(" {{AppId,vsn},JoscaFile}  ~p~n",[{?MODULE,?LINE,time(),{{AppId,Vsn},JoscaFile}}]),
     {dependencies,ServiceList}=lists:keyfind(dependencies,1,JoscaFile),
     NewAcc=check_services(ServiceList,State,Acc),
@@ -225,19 +221,6 @@ check_services([{Id,_Vsn}|T],State,Acc) ->
     check_services(T,State,NewAcc).
 
 
-services_to_start(NeededServices,DnsList,WantedNumInstances)->
-    AvailibleServices=[{DnsInfo#dns_info.service_id}||DnsInfo<-DnsList],
-    calc_to_start(NeededServices,AvailibleServices,WantedNumInstances,[]). 
-  
-calc_to_start([],_,_,Acc)->
-    Acc;
-calc_to_start([{Id}|T],AvailibleServices,WantedNumInstances,Acc) ->
-    L1=[{Id}||{A_ServiceId}<-AvailibleServices,
-		  true==({A_ServiceId}=:={Id})],
-    NumToStart=WantedNumInstances-lists:flatlength(L1),
-  %  io:format(" NumToStart, L1  ~p~n",[{?MODULE,?LINE,time(),NumToStart,L1}]),
-    NewAcc=[{{Id},NumToStart}|Acc],
-    calc_to_start(T,AvailibleServices,WantedNumInstances,NewAcc).
 
 missing_services(NeededServices,DnsList)->
     AvailibleServices=[{DnsInfo#dns_info.service_id}||DnsInfo<-DnsList],
@@ -249,75 +232,121 @@ missing_services(NeededServices,DnsList)->
 %% Description:
 %% Returns: non
 %% --------------------------------------------------------------------
+load_start_services(NeededServices,WantedNumInstances,State)->
+  %  io:format(" NeededServices,WantedNumInstances  ~p~n",[{?MODULE,?LINE,NeededServices,WantedNumInstances}]),
+    %% 1. Collect all service instances
+    %% 2. For each service collect allready deployed instances
+    %% 3. Remove Nodes that already have deployed the service from available node list 
+    %% 4. Calculate how many missing instances there are per service
+    %% 5. Start missing instances, based on the updaetd nodelist 
+    % 1.
+    {dns,DnsIp,DnsPort}=State#state.dns_addr,
+    AllAvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
+  %  io:format(" AllAvailableServices  ~p~n",[{?MODULE,?LINE,AllAvailableServices}]),
+    % 2.
+    AlreadyAvailableServiceInstances=[{ServiceId,DnsInfo}||{ServiceId}<-NeededServices,
+					       DnsInfo<-AllAvailableServices,
+					       DnsInfo#dns_info.service_id=:=ServiceId],
+   % io:format(" AlreadyAvailableServiceInstances  ~p~n",[{?MODULE,?LINE,AlreadyAvailableServiceInstances}]),
+    % 3.
+    FilteredAvailableNodeList=get_nodes_deploy_to(NeededServices,AlreadyAvailableServiceInstances,WantedNumInstances,State),
+ %   io:format(" FilteredAvailableNodeList  ~p~n",[{?MODULE,?LINE,time(),FilteredAvailableNodeList}]),
+    % 4.
+    %ServiceNumToStart=calc_num_start(NeededServices,FilteredAvailableNodeList),
+    
+    % 5.
+    StartResult=schedule_start(NeededServices,FilteredAvailableNodeList,WantedNumInstances,[]),
+  %  io:format(" StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}]),
+    
+    StartResult.
+       
 
-start_services([],_,StartResult)->
-    StartResult;
-start_services([{{ServiceId},NumInstances}|T],State,Acc)->
-  %  io:format(" ServiceId,Nodes  ~p~n",[{?MODULE,?LINE,time(),ServiceId}]),
-    GitService=State#state.git_url++?JOSCA++".git",
-    os:cmd("git clone "++GitService),
-    FileName=filename:join([?JOSCA,ServiceId++".josca"]),
-   % io:format(" FileName  ~p~n",[{?MODULE,?LINE,time(),FileName}]),
+get_nodes_deploy_to(NeededServices,AlreadyAvailableServiceInstances,WantedNumInstances,State)->
+  %  io:format("AlreadyAvailableServiceInstances,State  ~p~n",[{?MODULE,?LINE,AlreadyAvailableServiceInstances,State}]),
+    GitJoscaServices=State#state.git_url++?JOSCA++".git",
+    os:cmd("git clone "++GitJoscaServices),
+    FilteredAvailableNodeList=get_nodes_deploy_to(NeededServices,AlreadyAvailableServiceInstances,WantedNumInstances,State,[]),
+    FilteredAvailableNodeList.
+
+get_nodes_deploy_to([],_,_,_,FilteredAvailableNodeList)->
+  %  io:format("FilteredAvailableNodeList  ~p~n",[{?MODULE,?LINE,FilteredAvailableNodeList}]),
+    FilteredAvailableNodeList;
+
+get_nodes_deploy_to([{ServiceIdToDeploy}|T],AlreadyAvailableServiceInstances,WantedNumInstances,State,Acc)->
+    FileName=filename:join([?JOSCA,ServiceIdToDeploy++".josca"]),
+ %  io:format(" FileName  ~p~n",[{?MODULE,?LINE,time(),FileName}]),
     case file:consult(FileName) of
 	{error,Err}->
 	    NewAcc=[{error,Err}|Acc],
 	    io:format("~p~n",[{?MODULE,?LINE,'error',Err}]),
 	    {error,[?MODULE,?LINE,Err]};
 	{ok,JoscaInfo}->
+	   %  io:format("JoscaInfo  ~p~n",[{?MODULE,?LINE,JoscaInfo}]),
 	    {zone,WantedZone}=lists:keyfind(zone,1,JoscaInfo),
 	    {needed_capabilities,WantedCapabilities}=lists:keyfind(needed_capabilities,1,JoscaInfo),
-	    NodesFullfilledNeeds=get_nodes_fullfills_needs(WantedZone,WantedCapabilities,State#state.node_list),
-	    case NodesFullfilledNeeds of
-		[]->
-		    NewAcc=[{error,['error no availible nodes',ServiceId]}|Acc];
-		NodesFullfilledNeeds->
-%		    io:format(" NumInstances  ~p~n",[{?MODULE,?LINE,time(),NumInstances}]),
-		    R=schedule_start(ServiceId,NodesFullfilledNeeds,NumInstances),
-		    NewAcc=[R|Acc]
-	    end;
-	Err ->
-	    NewAcc=[{error,Err}|Acc],
-	    io:format("~p~n",[{?MODULE,?LINE,'error',Err}]),
-	     {error,[?MODULE,?LINE,Err]}
 	    
+	    AllNodesFullfilledNeeds=get_nodes_fullfills_needs(WantedZone,WantedCapabilities,State#state.node_list),
+	    
+	    ExistingServiceInstances=[{DnsInfo#dns_info.ip_addr,DnsInfo#dns_info.port}||{ServiceId,DnsInfo}<-AlreadyAvailableServiceInstances,
+				     ServiceIdToDeploy=:=ServiceId],
+	    NumInstances=lists:flatlength(ExistingServiceInstances),
+	    if 
+		NumInstances>(WantedNumInstances-1) -> 
+		    FilteredAvailableNodeList=[];
+		
+	        true-> % 
+		    AvailableNodeList=[{ServiceIdToDeploy,{Node#kubelet_info.ip_addr,Node#kubelet_info.port}}
+				       ||Node<-AllNodesFullfilledNeeds,
+					 false=:=lists:member({Node#kubelet_info.ip_addr,Node#kubelet_info.port}
+							     ,ExistingServiceInstances)],
+		    FilteredAvailableNodeList=lists:sublist(AvailableNodeList,WantedNumInstances-NumInstances)
+	    end,
+%	    io:format("FilteredAvailableNodeList  ~p~n",[{?MODULE,?LINE,FilteredAvailableNodeList}]),
+	    
+	    NewAcc=lists:join(Acc,FilteredAvailableNodeList)
     end,
-    start_services(T,State,NewAcc).
+    get_nodes_deploy_to(T,AlreadyAvailableServiceInstances,WantedNumInstances,State,NewAcc).
+	    
+	    
+
+schedule_start(_,_,0,StartResult)->
+    StartResult;
+schedule_start([],_,_,StartResult) ->
+    StartResult;
+schedule_start(_,[],_,StartResult) ->
+    StartResult;
+schedule_start([{ServiceIdToStart}|T],FilteredAvailableNodeList,WantedNumInstances,Acc)->
+    % Check if there are enough og nodes
+    NodesForService=[{ServiceId,{NodeIpAddr,NodePort}}||{ServiceId,{NodeIpAddr,NodePort}}<-FilteredAvailableNodeList,
+							ServiceId=:=ServiceIdToStart],
+    NumNodes=lists:flatlength(NodesForService),
+    Diff=NumNodes-WantedNumInstances,
+    StartResult=if
+		    NumNodes =:= 0-> % Error No nodes avaialble 
+			io:format("Error ~p~n",[{?MODULE,?LINE,'No nodes are availible for the service ',ServiceIdToStart}]),
+			{error,[?MODULE,?LINE,'No nodes are availible for the service ',ServiceIdToStart]};
+		    Diff < 0 -> % Ok To few nodes compare needed but nodes are availble , the list NodesForService limits num nodes started
+			[tcp:test_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
+			 ||{ServiceId,{NodeIpAddr,NodePort}}<-NodesForService];
+		    Diff =:= 0-> % Ok  Need and wanted matches, , the list NodesForService limits num nodes started
+			[tcp:test_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
+			 ||{ServiceId,{NodeIpAddr,NodePort}}<-NodesForService];
+	       Diff > 0 -> % Ok More nodes then needed, take a sublist to start
+			SubList=lists:sublist(NodesForService,WantedNumInstances),
+			[tcp:test_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
+			 ||{ServiceId,{NodeIpAddr,NodePort}}<-SubList]		
+		end,
+    NewAcc=[{ServiceIdToStart,StartResult}|Acc],
+    schedule_start(T,FilteredAvailableNodeList,WantedNumInstances,NewAcc).
+	    
+  
+
 
 %% --------------------------------------------------------------------
 %% Function: 
 %% Description:
 %% Returns: non
 %% --------------------------------------------------------------------
-schedule_start(ServiceId,NodesFullfilledNeeds,NumInstances)->
-    NumNodes=lists:flatlength(NodesFullfilledNeeds),
-    Result=case NumNodes of
-	       0->
-		   io:format("Error ~p~n",[{?MODULE,?LINE,'No nodes are availible for the service ',ServiceId}]),
-		   {error,[?MODULE,?LINE,'No nodes are availible for the service ',ServiceId]};
-	       NumNodes ->
-		   do_start(NodesFullfilledNeeds,NumInstances,ServiceId,[])
-    end,
-    Result.
-
-do_start([],_,_,StartResult)-> % Less nodes then NodesFullfilledNeeds
-    StartResult;
-do_start(_,0,_,StartResult)->
-      StartResult;
-do_start([KubeleteInfo|T],NumInstances,ServicesId,Acc)->
-    IpAddr=KubeleteInfo#kubelet_info.ip_addr,
-    Port=KubeleteInfo#kubelet_info.port,
-    StartResult=tcp:test_call([{IpAddr,Port}],{kubelet,start_service,[ServicesId]}),
- %   io:format(" StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}]),
-    case StartResult of
-       {error,Err}->
-	    io:format(" ~p~n",[{?MODULE,?LINE,time(),{error,Err}}]),
-	    NewNumInstances=NumInstances;
-	_->
-	    NewNumInstances=NumInstances-1
-    end,
-  %  io:format(" NewNumInstances  ~p~n",[{?MODULE,?LINE,time(),NewNumInstances}]),
-    NewAcc=[StartResult|Acc],
-    do_start(T,NewNumInstances,ServicesId,NewAcc).
 
 
 
@@ -327,6 +356,7 @@ do_start([KubeleteInfo|T],NumInstances,ServicesId,Acc)->
 %% Returns: non
 %% --------------------------------------------------------------------
 get_nodes_fullfills_needs(WantedZone,WantedCapabilities,AvailibleNodes)->
+  %  io:format(" AvailibleNodes  ~p~n",[{?MODULE,?LINE,AvailibleNodes}]),
     % Which nodes is in needed zone
     Workers=[X_Node||X_Node<-AvailibleNodes,
 		     X_Node#kubelet_info.node_type=:=worker_node],
@@ -344,7 +374,7 @@ get_nodes_fullfills_needs(WantedZone,WantedCapabilities,AvailibleNodes)->
 				 [Node||Node<-RightZone,
 					check_capbility(WantedCapabilities,Node)]
 			 end,
-    
+ %   io:format(" NodesFullfilledNeeds  ~p~n",[{?MODULE,?LINE,NodesFullfilledNeeds}]),
     NodesFullfilledNeeds.
 
 
