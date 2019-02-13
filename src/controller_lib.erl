@@ -104,7 +104,7 @@ campaign(State)->
     %keep system services repo, catalog, controller
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
     AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}), 
-    L1=keep_system_services(["dns","controller"],AvailableServices),
+    L1=keep_system_services([?KEEP_SYSTEM_SERVICES],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
  %   io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,time(),SurplusServices}]),
     _StopResult=controller_lib:stop_services(SurplusServices,AvailableServices,State),
@@ -178,7 +178,7 @@ stop_services([{ServiceId}|T],DnsList,State)->
 do_stop([],_,StopResult)->
     StopResult;
 do_stop([{IpAddr,Port,ServiceId,DnsInfo}|T],{DnsIp,DnsPort},Acc)->
-    Stop=tcp:test_call([{IpAddr,Port}],{kubelet,stop_service,[ServiceId]}),
+    Stop=ssl_lib:ssl_call([{IpAddr,Port}],{kubelet,stop_service,[ServiceId]}),
     Cast=if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
     NewAcc=[{ServiceId,{IpAddr,Port},Stop,Cast}|Acc],
     do_stop(T,{DnsIp,DnsPort},NewAcc).
@@ -326,14 +326,14 @@ schedule_start([{ServiceIdToStart}|T],FilteredAvailableNodeList,WantedNumInstanc
 			io:format("Error ~p~n",[{?MODULE,?LINE,'No nodes are availible for the service ',ServiceIdToStart}]),
 			{error,[?MODULE,?LINE,'No nodes are availible for the service ',ServiceIdToStart]};
 		    Diff < 0 -> % Ok To few nodes compare needed but nodes are availble , the list NodesForService limits num nodes started
-			[tcp:test_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
+			[ssl_lib:ssl_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
 			 ||{ServiceId,{NodeIpAddr,NodePort}}<-NodesForService];
 		    Diff =:= 0-> % Ok  Need and wanted matches, , the list NodesForService limits num nodes started
-			[tcp:test_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
+			[ssl_lib:ssl_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
 			 ||{ServiceId,{NodeIpAddr,NodePort}}<-NodesForService];
 	       Diff > 0 -> % Ok More nodes then needed, take a sublist to start
 			SubList=lists:sublist(NodesForService,WantedNumInstances),
-			[tcp:test_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
+			[ssl_lib:ssl_call([{NodeIpAddr,NodePort}],{kubelet,start_service,[ServiceId]})
 			 ||{ServiceId,{NodeIpAddr,NodePort}}<-SubList]		
 		end,
     NewAcc=[{ServiceIdToStart,StartResult}|Acc],

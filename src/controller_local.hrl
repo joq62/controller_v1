@@ -5,3 +5,4 @@
 		dns_info,dns_addr}).
 
 -define(WANTED_NUM_INSTANCES,2).
+-define(KEEP_SYSTEM_SERVICES,"dns","controller","applog").

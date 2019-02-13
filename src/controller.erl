@@ -275,6 +275,9 @@ handle_cast(Msg, State) ->
 %%          {stop, Reason, State}            (terminate/2 is called)
 %% --------------------------------------------------------------------
 
+handle_info({ssl_closed,{sslsocket,{gen_tcp,Port,tls_connection,undefined},Pid}}, State)->
+   % io:format("Port, Pid  ~p~n",[{?MODULE,?LINE,Port, Pid}]),
+    {noreply, State};
 
 handle_info(Info, State) ->
     io:format("unmatched match info ~p~n",[{time(),?MODULE,?LINE,Info}]),
