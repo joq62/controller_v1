@@ -119,6 +119,8 @@ init([]) ->
     spawn(fun()-> local_heart_beat(?HEARTBEAT_INTERVAL) end), 
     spawn(fun()-> do_campaign(?HEARTBEAT_INTERVAL) end),    
     io:format("Started Service  ~p~n",[{?MODULE}]),
+    Msg=if_log:init('INFO',7,"controller started"),
+    if_dns:cast("applog",{applog,log,[Msg]},{DnsIp,DnsPort}),
     {ok, #state{git_url=GitUrl,
 		dns_list=[],node_list=[],application_list=[],
 		dns_info=DnsInfo,dns_addr={dns,DnsIp,DnsPort}}}.  
@@ -225,6 +227,9 @@ handle_call({heart_beat},_,State) ->
 
 
 handle_call({campaign,Interval},_, State) ->
+    {dns,DnsIp,DnsPort}=State#state.dns_addr,
+    Msg=if_log:init('INFO',7,"campaign"),
+    if_dns:cast("applog",{applog,log,[Msg]},{DnsIp,DnsPort}),
     Reply=rpc:call(node(),controller_lib,campaign,[State]),
     spawn(fun()-> do_campaign(Interval) end),
     {reply,Reply, State};
