@@ -107,7 +107,7 @@ de_node_register(KubeletInfo)->
 init([]) ->
     {ok,MyIp}=application:get_env(ip_addr),
     {ok,Port}=application:get_env(port),
-    {ok,ServiceId}=application:get_env(service_id),
+    {ok,ApplicationId}=application:get_env(application_id),
     {ok,DnsIp}=application:get_env(dns_ip_addr),
     {ok,DnsPort}=application:get_env(dns_port),
     {ok,GitUrl}=application:get_env(git_url),
@@ -121,7 +121,7 @@ init([]) ->
 		       }||ServiceId<-ExportedServices],
     spawn(fun()-> local_heart_beat(?HEARTBEAT_INTERVAL) end), 
     spawn(fun()-> do_campaign(?HEARTBEAT_INTERVAL) end),    
-    io:format("Started Service  ~p~n",[{?MODULE}]),
+    io:format("Started application  ~p~n",[{ApplicationId}]),
     Msg=if_log:init('INFO',7,["controller started"]),
     if_dns:cast("applog",{applog,log,[Msg]}),
     {ok, #state{git_url=GitUrl,
@@ -139,9 +139,11 @@ init([]) ->
 %%          {stop, Reason, State}            (terminate/2 is called)
 %% --------------------------------------------------------------------
 handle_call({add,AppId,Vsn}, _From, State) ->
-    if_dns:cast("applog",{applog,log,
-			  [if_log:init('INFO',7,["start application",AppId,Vsn])]
-			 }),
+    io:format("~p~n",[{?MODULE,?LINE, add,AppId,Vsn}]),
+
+ %   if_dns:cast("applog",{applog,log,
+%			  [if_log:init('INFO',7,["start application",AppId,Vsn])]
+%			 }),
     Reply=case lists:keyfind({AppId,Vsn},1,State#state.application_list) of
 	      false->
 		  GitUrl=State#state.git_url,
@@ -151,6 +153,7 @@ handle_call({add,AppId,Vsn}, _From, State) ->
 		  case file:consult(FileName) of
 		      {error,Err}->
 			  NewState=State,
+			  io:format("~p~n",[{?MODULE,?LINE, error,Err}]),
 			  if_dns:cast("applog",{applog,log,
 						[if_log:init('ERROR',3,["file:consult",FileName,Err])]
 					       }),

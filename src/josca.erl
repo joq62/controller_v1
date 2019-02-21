@@ -116,8 +116,8 @@ start_order(Name,State)->
 			   {type,application}->
 			       [];
 			   {type,service} ->
-			       {exported_services,[{ServiceId,Vsn}]}=lists:keyfind(exported_services,1,JoscaInfo),
-			       [{ServiceId}]
+			       {application_id,ApplicationId}=lists:keyfind(application_id,1,JoscaInfo),
+			       ApplicationId
 		       end,
 						% io:format("~p~n",[{?MODULE,?LINE,Acc}]),
 		   {dependencies,JoscaFiles}=lists:keyfind(dependencies,1,JoscaInfo),
