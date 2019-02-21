@@ -111,16 +111,19 @@ init([]) ->
     {ok,DnsIp}=application:get_env(dns_ip_addr),
     {ok,DnsPort}=application:get_env(dns_port),
     {ok,GitUrl}=application:get_env(git_url),
-     DnsInfo=#dns_info{time_stamp="not_initiaded_time_stamp",
+    {ok,ExportedServices}=application:get_env(exported_services),
+
+    
+    DnsInfo=[#dns_info{time_stamp="not_initiaded_time_stamp",
 			service_id = ServiceId,
 			ip_addr=MyIp,
 			port=Port
-		       },
+		       }||ServiceId<-ExportedServices],
     spawn(fun()-> local_heart_beat(?HEARTBEAT_INTERVAL) end), 
     spawn(fun()-> do_campaign(?HEARTBEAT_INTERVAL) end),    
     io:format("Started Service  ~p~n",[{?MODULE}]),
-    Msg=if_log:init('INFO',7,"controller started"),
-    if_dns:cast("applog",{applog,log,[Msg]},{DnsIp,DnsPort}),
+    Msg=if_log:init('INFO',7,["controller started"]),
+    if_dns:cast("applog",{applog,log,[Msg]}),
     {ok, #state{git_url=GitUrl,
 		dns_list=[],node_list=[],application_list=[],
 		dns_info=DnsInfo,dns_addr={dns,DnsIp,DnsPort}}}.  
@@ -136,7 +139,9 @@ init([]) ->
 %%          {stop, Reason, State}            (terminate/2 is called)
 %% --------------------------------------------------------------------
 handle_call({add,AppId,Vsn}, _From, State) ->
-    io:format(" Add new application ~p~n",[{?MODULE,?LINE,time(),add,AppId,Vsn}]),
+    if_dns:cast("applog",{applog,log,
+			  [if_log:init('INFO',7,["start application",AppId,Vsn])]
+			 }),
     Reply=case lists:keyfind({AppId,Vsn},1,State#state.application_list) of
 	      false->
 		  GitUrl=State#state.git_url,
@@ -146,6 +151,9 @@ handle_call({add,AppId,Vsn}, _From, State) ->
 		  case file:consult(FileName) of
 		      {error,Err}->
 			  NewState=State,
+			  if_dns:cast("applog",{applog,log,
+						[if_log:init('ERROR',3,["file:consult",FileName,Err])]
+					       }),
 			  io:format(" Error  ~p~n",[{?MODULE,?LINE,time(),Err}]),
 			  {error,[?MODULE,?LINE,AppId,Vsn,Err]};
 		      {ok,JoscaInfo}->
@@ -216,12 +224,13 @@ handle_call({all_nodes},_From, State) ->
 handle_call({heart_beat},_,State) ->
     DnsInfo=State#state.dns_info,
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
-    if_dns:cast("dns",{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort}), 
+    [if_dns:cast("dns",{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort})||DnsInfo<-State#state.dns_info],
     Now=erlang:now(),
     NewNodeList=[KubeletInfo||KubeletInfo<-State#state.node_list,
 		      (timer:now_diff(Now,KubeletInfo#kubelet_info.time_stamp)/1000)<?INACITIVITY_TIMEOUT],
 
     NewState=State#state{node_list=NewNodeList},
+    if_log:log('INFO',7,[?LINE,"some info", glurk]),
     Reply=NewNodeList,
    {reply,Reply,NewState};
 
