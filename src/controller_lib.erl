@@ -93,7 +93,7 @@ nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,Nodes])
 %% --------------------------------------------------------------------
 campaign(State)->
     io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
-    NeededServices=controller_lib:needed_services(State#state.application_list,State),
+    NeededServices=controller_lib:needed_applications(State#state.application_list,State),
     io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
  
  %   io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,time(),AvailableServices}]),
@@ -107,7 +107,7 @@ campaign(State)->
     L1=keep_system_services([?KEEP_SYSTEM_SERVICES],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
     io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,time(),SurplusServices}]),
-    _StopResult=controller_lib:stop_services(SurplusServices,AvailableServices,State),
+    _StopResult=controller_lib:stop_applications(SurplusServices,AvailableServices,State),
     controller_lib:nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,State#state.node_list]),
     ok.
 
@@ -159,54 +159,89 @@ de_node_register(KubeletInfo, State) ->
 %% Description:
 %% Returns: non
 %% --------------------------------------------------------------------
-stop_services([],DnsList,_State)->
+stop_applications([],DnsList,_State)->
     DnsList;
-stop_services([{ServiceId}|T],DnsList,State)->
+stop_applications([ApplicationId|T],DnsList,State)->
+    io:format(" ApplicationId ~p~n",[{?MODULE,?LINE,ApplicationId}]),
     ListWithIp=[{DnsInfo#dns_info.ip_addr,DnsInfo#dns_info.port,
 		 DnsInfo#dns_info.service_id,DnsInfo}||DnsInfo<-DnsList,
-						       {ServiceId}=:={DnsInfo#dns_info.service_id}],
-  %  io:format(" stop_services ListWithIp  ~p~n",[{?MODULE,?LINE,time(),ListWithIp}]),
+						       ApplicationId=:=DnsInfo#dns_info.service_id],
+    io:format(" stop_services ListWithIp  ~p~n",[{?MODULE,?LINE,ListWithIp}]),
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
-  %  [{if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
-   %   tcp:test_call([{X_IpAddr,X_Port}],{kubelet,stop_service,[X_ServiceId]})}||{X_IpAddr,X_Port,X_ServiceId,DnsInfo}<-ListWithIp],
-
     _StopResult=do_stop(ListWithIp,{DnsIp,DnsPort},[]),
     NewDnsList=[Y_DnsInfo||Y_DnsInfo<-DnsList,
-			   false==({ServiceId}=:={Y_DnsInfo#dns_info.service_id})],
-    stop_services(T,NewDnsList,State).
+			   false==(ApplicationId=:=Y_DnsInfo#dns_info.service_id)],
+    stop_applications(T,NewDnsList,State).
 
 do_stop([],_,StopResult)->
     StopResult;
-do_stop([{IpAddr,Port,ServiceId,DnsInfo}|T],{DnsIp,DnsPort},Acc)->
-    Stop=ssl_lib:ssl_call([{IpAddr,Port}],{kubelet,stop_service,[ServiceId]}),
-    Cast=if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort}),
-    NewAcc=[{ServiceId,{IpAddr,Port},Stop,Cast}|Acc],
+do_stop([{IpAddr,Port,ApplicationId,DnsInfo}|T],{DnsIp,DnsPort},Acc)->
+    Stop=ssl_lib:ssl_call([{IpAddr,Port}],{kubelet,stop_service,[ApplicationId]}),
+    NewAcc=[{ApplicationId,{IpAddr,Port},Stop}|Acc],
     do_stop(T,{DnsIp,DnsPort},NewAcc).
     
 						  
+
 %% --------------------------------------------------------------------
 %% Function: 
 %% Description:
 %% Returns: non
 %% --------------------------------------------------------------------
-needed_services(ApplicationList,State)->
-    io:format(" ApplicationList  ~p~n",[{?MODULE,?LINE,time(),ApplicationList}]),
-    needed_services(ApplicationList,State,[]).
+which_to_stop(AppId,Vsn,NewAppList,JoscaInfo,State)->
+    AllApplications=rpc:call(node(),controller_lib,needed_applications,[NewAppList,State]),
+   io:format(" AllApplications  ~p~n",[{?MODULE,?LINE,AllApplications}]),
 
-needed_services([],_,NeededServices)->
-    io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
+%   Get which applications that needs to be removed
+    AppIdServices=rpc:call(node(),controller_lib,needed_applications,[[{{AppId,Vsn},JoscaInfo}],State]),
+
+   io:format(" AppIdServices  ~p~n",[{?MODULE,?LINE,AppIdServices}]),
+    
+    ApplicationToStop=[X_ApplicationId||X_ApplicationId<-AppIdServices,
+					false==lists:member(X_ApplicationId,AllApplications)],
+    ServicesToDeRegister=which_services_de_reg(ApplicationToStop,[]),
+%    io:format(" ApplicationToStop  ~p~n",[{?MODULE,?LINE,ApplicationToStop}]),
+    io:format(" ApplicationToStop,ServicesToDeRegister  ~p~n",[{?MODULE,?LINE,ApplicationToStop,ServicesToDeRegister}]),
+    {ApplicationToStop,ServicesToDeRegister}.
+
+
+which_services_de_reg([],ServicesToDeRegister)->
+    ServicesToDeRegister;
+which_services_de_reg([ApplicationId|T],Acc) ->
+     FileName=filename:join([?JOSCA,ApplicationId++".josca"]),
+    case file:consult(FileName) of
+	{error,Err}->
+	    {error,[?MODULE,?LINE,Err,FileName]},
+	    io:format("~p~n",[{error,[?MODULE,?LINE,Err,FileName]}]),
+	    NewAcc=[{error,[?MODULE,?LINE,Err,FileName]}|Acc];
+	{ok,JoscaInfo}->
+	    {exported_services,ExportedServices}=lists:keyfind(exported_services,1,JoscaInfo),
+	    NewAcc=lists:append(ExportedServices,Acc)
+    end,
+    which_services_de_reg(T,NewAcc).
+
+%% --------------------------------------------------------------------
+%% Function: 
+%% Description:
+%% Returns: non
+%% --------------------------------------------------------------------
+needed_applications(ApplicationList,State)->
+   % io:format(" ApplicationList  ~p~n",[{?MODULE,?LINE,time(),ApplicationList}]),
+    needed_applications(ApplicationList,State,[]).
+
+needed_applications([],_,NeededServices)->
+  %  io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
     NeededServices;
-needed_services([{{AppId,Vsn},JoscaFile}|T],State,Acc)->
-    io:format(" {{AppId,vsn},JoscaFile}  ~p~n",[{?MODULE,?LINE,time(),{{AppId,Vsn},JoscaFile}}]),
-    {dependencies,ServiceList}=lists:keyfind(dependencies,1,JoscaFile),
-    io:format(" ServiceList ~p~n",[{?MODULE,?LINE,ServiceList}]),
-    NewAcc=check_services(ServiceList,State,Acc),
-    io:format(" NewAcc  ~p~n",[{?MODULE,?LINE,time(),NewAcc}]),
-    needed_services(T,State,NewAcc).
+needed_applications([{{AppId,Vsn},JoscaFile}|T],State,Acc)->
+ %   io:format(" {{AppId,vsn},JoscaFile}  ~p~n",[{?MODULE,?LINE,time(),{{AppId,Vsn},JoscaFile}}]),
+    {dependencies,ApplicationList}=lists:keyfind(dependencies,1,JoscaFile),
+  %  io:format(" ServiceList ~p~n",[{?MODULE,?LINE,ApplicationList}]),
+    NewAcc=check_applications(ApplicationList,State,Acc),
+  %  io:format(" NewAcc  ~p~n",[{?MODULE,?LINE,time(),NewAcc}]),
+    needed_applications(T,State,NewAcc).
 
-check_services([],_,Acc)->
+check_applications([],_,Acc)->
     Acc;
-check_services([Id|T],State,Acc) ->
+check_applications([Id|T],State,Acc) ->
     NewAcc=case josca:start_order(Id,State) of
 	       {error,Err}->
 		   io:format("error~p~n",[{?MODULE,?LINE,Err}]),
@@ -220,7 +255,7 @@ check_services([Id|T],State,Acc) ->
 			   [ApplicationId|Acc]
 		   end
 	   end,
-    check_services(T,State,NewAcc).
+    check_applications(T,State,NewAcc).
 
 
 

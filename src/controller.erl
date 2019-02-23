@@ -183,23 +183,27 @@ handle_call({remove,AppId,Vsn}, _From, State)->
 		  NewState=State,
 		  {error,[?MODULE,?LINE,'eexists',AppId,Vsn]};
 	      {{AppId,Vsn},JoscaInfo}->
-    % Remove the josca spec for the application from the list of active applications
+		  
+	        % Remove the josca spec for the application from the list of active applications
 		  NewAppList=lists:keydelete({AppId,Vsn},1,State#state.application_list),
-%		  io:format(" NewAppList  ~p~n",[{?MODULE,?LINE,NewAppList}]),
-    % Get services that needs to be left
-		  AllServices=rpc:call(node(),controller_lib,needed_services,[NewAppList,State]),
-%		  io:format(" AllServices  ~p~n",[{?MODULE,?LINE,AllServices}]),
 
-    % Get which services that the application that will be removed used
-		  AppIdServices=rpc:call(node(),controller_lib,needed_services,[[{{AppId,Vsn},JoscaInfo}],State]),
-%		  io:format(" AppIdServices  ~p~n",[{?MODULE,?LINE,AppIdServices}]),
-		  ServicesToStop=[{X_ServiceId}||{X_ServiceId}<-AppIdServices,
-						 false==lists:member({X_ServiceId},AllServices)],
-%		  io:format(" ServicesToStop  ~p~n",[{?MODULE,?LINE,ServicesToStop}]),
+%		  io:format(" NewAppList  ~p~n",[{?MODULE,?LINE,NewAppList}]),
 		  % DNS holds all information about services 
 		  {dns,DnsIp,DnsPort}=State#state.dns_addr,
 		  AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
-		  NewDnsList=rpc:call(node(),controller_lib,stop_services,[ServicesToStop,AvailableServices,State]),
+
+    % Get applications that shall be removed and services that shall be de_registered  
+		  {ApplicationToStop,ServicesToDeRegister}=controller_lib:which_to_stop(AppId,Vsn,NewAppList,JoscaInfo,State),
+		  
+		  NewDnsList=rpc:call(node(),controller_lib,stop_applications,[ApplicationToStop,AvailableServices,State]),
+    %  io:format(" IpAddr,Port,ServiceId Stop    ~p~n",[{?MODULE,?LINE,Stop,IpAddr,Port,ServiceId}]),
+		  
+		  DnsInfoServicesToDeRegister=[DnsInfo||DnsInfo<-AvailableServices,ServiceId<-ServicesToDeRegister,
+							DnsInfo#dns_info.service_id==ServiceId],
+		  
+		  io:format("DnsInfoServicesToDeRegister  ~p~n",[{?MODULE,?LINE,DnsInfoServicesToDeRegister}]),
+		  [if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort})||DnsInfo<-DnsInfoServicesToDeRegister],
+		  
 		  NewState=State#state{application_list=NewAppList,dns_list=NewDnsList},
 		  ok
 	  end,
