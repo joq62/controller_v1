@@ -104,6 +104,7 @@ campaign(State)->
     %keep system services repo, catalog, controller
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
     AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}), 
+    io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,AvailableServices}]),
     L1=keep_system_services([?KEEP_SYSTEM_SERVICES],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
     io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,time(),SurplusServices}]),
@@ -112,7 +113,7 @@ campaign(State)->
     ok.
 
 keep_system_services([],WorkerService)->
-    [{DnsInfo#dns_info.service_id}||DnsInfo<-WorkerService];
+    [DnsInfo#dns_info.service_id||DnsInfo<-WorkerService];
 keep_system_services([ServiceId|T],Acc)->
     NewAcc=[DnsInfo||DnsInfo<-Acc,
 		     false==(DnsInfo#dns_info.service_id==ServiceId)],
@@ -120,9 +121,13 @@ keep_system_services([ServiceId|T],Acc)->
 
 
 surplus_services([],SurplusServices)->
+    io:format(" glurk SurplusServices  ~p~n",[{?MODULE,?LINE,SurplusServices}]),  
     SurplusServices;
-surplus_services([X_DnsInfo|T],Acc)->
-    
+%surplus_services([X_DnsInfo|T],Acc)->
+surplus_services(X,Acc)->
+    io:format(" X,Acc  ~p~n",[{?MODULE,?LINE,X,Acc}]),  
+    [X_DnsInfo|T]=X,
+    io:format(" X_DnsInfo,Acc  ~p~n",[{?MODULE,?LINE,X_DnsInfo,Acc}]),
     NewAcc=[DnsInfo||DnsInfo<-Acc,
 		     false==({DnsInfo#dns_info.service_id}==
 				 {X_DnsInfo#dns_info.service_id})],
@@ -321,14 +326,14 @@ get_nodes_deploy_to([ServiceIdToDeploy|T],AlreadyAvailableServiceInstances,Wante
 	   %  io:format("JoscaInfo  ~p~n",[{?MODULE,?LINE,JoscaInfo}]),
 	    {zone,WantedZone}=lists:keyfind(zone,1,JoscaInfo),
 	    {needed_capabilities,WantedCapabilities}=lists:keyfind(needed_capabilities,1,JoscaInfo),
-	    
+	    {num_instances,NumWantedInstances}=lists:keyfind(num_instances,1,JoscaInfo),
 	    AllNodesFullfilledNeeds=get_nodes_fullfills_needs(WantedZone,WantedCapabilities,State#state.node_list),
 	    
 	    ExistingServiceInstances=[{DnsInfo#dns_info.ip_addr,DnsInfo#dns_info.port}||{ServiceId,DnsInfo}<-AlreadyAvailableServiceInstances,
 				     ServiceIdToDeploy=:=ServiceId],
 	    NumInstances=lists:flatlength(ExistingServiceInstances),
 	    if 
-		NumInstances>(WantedNumInstances-1) -> 
+		NumInstances>(NumWantedInstances-1) -> 
 		    FilteredAvailableNodeList=[];
 		
 	        true-> % 
@@ -336,7 +341,7 @@ get_nodes_deploy_to([ServiceIdToDeploy|T],AlreadyAvailableServiceInstances,Wante
 				       ||Node<-AllNodesFullfilledNeeds,
 					 false=:=lists:member({Node#kubelet_info.ip_addr,Node#kubelet_info.port}
 							     ,ExistingServiceInstances)],
-		    FilteredAvailableNodeList=lists:sublist(AvailableNodeList,WantedNumInstances-NumInstances)
+		    FilteredAvailableNodeList=lists:sublist(AvailableNodeList,NumWantedInstances-NumInstances)
 	    end,
 %	    io:format("FilteredAvailableNodeList  ~p~n",[{?MODULE,?LINE,FilteredAvailableNodeList}]),
 	    
