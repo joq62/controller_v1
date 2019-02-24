@@ -107,7 +107,7 @@ campaign(State)->
     io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,AvailableServices}]),
     L1=keep_system_services([?KEEP_SYSTEM_SERVICES],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
-    io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,time(),SurplusServices}]),
+    io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,SurplusServices}]),
     _StopResult=controller_lib:stop_applications(SurplusServices,AvailableServices,State),
     controller_lib:nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,State#state.node_list]),
     ok.
@@ -398,7 +398,7 @@ schedule_start([ServiceIdToStart|T],FilteredAvailableNodeList,WantedNumInstances
 %% Returns: non
 %% --------------------------------------------------------------------
 get_nodes_fullfills_needs(WantedZone,WantedCapabilities,AvailibleNodes)->
-  %  io:format(" AvailibleNodes  ~p~n",[{?MODULE,?LINE,AvailibleNodes}]),
+    io:format("WantedZone,WantedCapabilities,AvailibleNodes  ~p~n",[{?MODULE,?LINE,WantedZone,WantedCapabilities,AvailibleNodes}]),
     % Which nodes is in needed zone
     Workers=[X_Node||X_Node<-AvailibleNodes,
 		     X_Node#kubelet_info.node_type=:=worker_node],
