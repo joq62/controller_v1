@@ -405,9 +405,11 @@ get_nodes_fullfills_needs(WantedZone,WantedCapabilities,AvailibleNodes)->
     RightZone = case WantedZone of
 		    []->
 			Workers;
-		    Zone ->
+		    ZoneList ->
+			[Zone]=ZoneList,
    			[Node||Node<-Workers,
-				Node#kubelet_info.zone=:=Zone]
+			       lists:member(Zone,Node#kubelet_info.zone)]
+		%		Node#kubelet_info.zone=:=Zone]
 		end,
     NodesFullfilledNeeds=case WantedCapabilities of
 			     []->
