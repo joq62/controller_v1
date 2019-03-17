@@ -229,9 +229,11 @@ handle_call({all_nodes},_From, State) ->
 %% Returns: non
 %% --------------------------------------------------------------------
 handle_call({heart_beat},_,State) ->
-    DnsInfo=State#state.dns_info,
-    {dns,DnsIp,DnsPort}=State#state.dns_addr,
-    [if_dns:cast("dns",{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort})||DnsInfo<-State#state.dns_info],
+
+    rpc:cast(node(),kubelet,register,[atom_to_list(?MODULE)]),
+  %  DnsInfo=State#state.dns_info,
+  %  {dns,DnsIp,DnsPort}=State#state.dns_addr,
+  %  [if_dns:cast("dns",{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort})||DnsInfo<-State#state.dns_info],
     Now=erlang:now(),
     NewNodeList=[KubeletInfo||KubeletInfo<-State#state.node_list,
 		      (timer:now_diff(Now,KubeletInfo#kubelet_info.time_stamp)/1000)<?INACITIVITY_TIMEOUT],
