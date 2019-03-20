@@ -10,6 +10,11 @@
 %% --------------------------------------------------------------------
 %% Include files
 %% --------------------------------------------------------------------
+
+-include("interface/if_kubelet.hrl").
+-include("interface/if_dns.hrl").
+
+
 -include("controller/src/controller_local.hrl").
 
 -include("include/tcp.hrl").
@@ -189,9 +194,8 @@ handle_call({remove,AppId,Vsn}, _From, State)->
 
 %		  io:format(" NewAppList  ~p~n",[{?MODULE,?LINE,NewAppList}]),
 		  % DNS holds all information about services 
-		  {dns,DnsIp,DnsPort}=State#state.dns_addr,
-		  AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
-
+		  AvailableServices= kubelet:send("dns",?GetAllInstances()),
+		
     % Get applications that shall be removed and services that shall be de_registered  
 		  {ApplicationToStop,ServicesToDeRegister}=controller_lib:which_to_stop(AppId,Vsn,NewAppList,JoscaInfo,State),
 		  
@@ -202,7 +206,8 @@ handle_call({remove,AppId,Vsn}, _From, State)->
 							DnsInfo#dns_info.service_id==ServiceId],
 		  
 		  io:format("DnsInfoServicesToDeRegister  ~p~n",[{?MODULE,?LINE,DnsInfoServicesToDeRegister}]),
-		  [if_dns:cast("dns",{dns,de_dns_register,[DnsInfo]},{DnsIp,DnsPort})||DnsInfo<-DnsInfoServicesToDeRegister],
+		
+		  [kubelet:send("dns",?DeDnsRegister(DnsInfo))||DnsInfo<-DnsInfoServicesToDeRegister],
 		  
 		  NewState=State#state{application_list=NewAppList,dns_list=NewDnsList},
 		  ok
@@ -229,19 +234,13 @@ handle_call({all_nodes},_From, State) ->
 %% Returns: non
 %% --------------------------------------------------------------------
 handle_call({heart_beat},_,State) ->
-
-    rpc:cast(node(),kubelet,register,[atom_to_list(?MODULE)]),
-  %  DnsInfo=State#state.dns_info,
-  %  {dns,DnsIp,DnsPort}=State#state.dns_addr,
-  %  [if_dns:cast("dns",{dns,dns_register,[DnsInfo]},{DnsIp,DnsPort})||DnsInfo<-State#state.dns_info],
+    kubelet:send("kubelet",?Register(atom_to_list(?MODULE))),
     Now=erlang:now(),
     NewNodeList=[KubeletInfo||KubeletInfo<-State#state.node_list,
 		      (timer:now_diff(Now,KubeletInfo#kubelet_info.time_stamp)/1000)<?INACITIVITY_TIMEOUT],
-
     NewState=State#state{node_list=NewNodeList},
-    if_log:log('INFO',7,[?LINE,"some info", glurk]),
     Reply=NewNodeList,
-   {reply,Reply,NewState};
+    {reply,Reply,NewState};
 
 
 handle_call({campaign,Interval},_, State) ->
@@ -321,16 +320,6 @@ terminate(_Reason, _State) ->
 %% --------------------------------------------------------------------
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-%% --------------------------------------------------------------------
-%%% Internal functions
-%% --------------------------------------------------------------------
-%% --------------------------------------------------------------------
-%% Function: 
-%% Description:
-%% Returns: non
-%% --------------------------------------------------------------------
-
 
 %% --------------------------------------------------------------------
 %% Internal functions

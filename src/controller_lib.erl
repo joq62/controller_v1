@@ -11,6 +11,8 @@
 %% --------------------------------------------------------------------
 %% Include files
 %% --------------------------------------------------------------------
+-include("interface/if_dns.hrl").
+
 -include("controller/src/controller_local.hrl").
 
 -include("include/tcp.hrl").
@@ -92,22 +94,22 @@ nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,Nodes])
 %% Returns: non
 %% --------------------------------------------------------------------
 campaign(State)->
-    io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
+%    io:format(" State#state.application_list  ~p~n",[{?MODULE,?LINE,time(),State#state.application_list}]),
     NeededServices=controller_lib:needed_applications(State#state.application_list,State),
-    io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
+%    io:format(" NeededServices  ~p~n",[{?MODULE,?LINE,time(),NeededServices}]),
  
  %   io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,time(),AvailableServices}]),
 
     StartResult=controller_lib:load_start_services(NeededServices,?WANTED_NUM_INSTANCES,State),
-    io:format("StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}]),
+ %   io:format("StartResult  ~p~n",[{?MODULE,?LINE,time(),StartResult}]),
 
     %keep system services repo, catalog, controller
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
     AvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}), 
-    io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,AvailableServices}]),
+  %  io:format(" AvailableServices  ~p~n",[{?MODULE,?LINE,AvailableServices}]),
     L1=keep_system_services([?KEEP_SYSTEM_SERVICES],AvailableServices),
     SurplusServices=controller_lib:surplus_services(NeededServices,L1),
-    io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,SurplusServices}]),
+%    io:format(" SurplusServices  ~p~n",[{?MODULE,?LINE,SurplusServices}]),
     _StopResult=controller_lib:stop_applications(SurplusServices,AvailableServices,State),
     controller_lib:nice_print([AvailableServices,NeededServices,StartResult,SurplusServices,State#state.node_list]),
     ok.
@@ -125,9 +127,9 @@ surplus_services([],SurplusServices)->
     SurplusServices;
 %surplus_services([X_DnsInfo|T],Acc)->
 surplus_services(X,Acc)->
-    io:format(" X,Acc  ~p~n",[{?MODULE,?LINE,X,Acc}]),  
+  %  io:format(" X,Acc  ~p~n",[{?MODULE,?LINE,X,Acc}]),  
     [X_DnsInfo|T]=X,
-    io:format(" X_DnsInfo,Acc  ~p~n",[{?MODULE,?LINE,X_DnsInfo,Acc}]),
+ %   io:format(" X_DnsInfo,Acc  ~p~n",[{?MODULE,?LINE,X_DnsInfo,Acc}]),
     NewAcc=[DnsInfo||DnsInfo<-Acc,
 		     false==({DnsInfo#dns_info.service_id}==
 				 {X_DnsInfo#dns_info.service_id})],
@@ -167,11 +169,11 @@ de_node_register(KubeletInfo, State) ->
 stop_applications([],DnsList,_State)->
     DnsList;
 stop_applications([ApplicationId|T],DnsList,State)->
-    io:format(" ApplicationId ~p~n",[{?MODULE,?LINE,ApplicationId}]),
+ %   io:format(" ApplicationId ~p~n",[{?MODULE,?LINE,ApplicationId}]),
     ListWithIp=[{DnsInfo#dns_info.ip_addr,DnsInfo#dns_info.port,
 		 DnsInfo#dns_info.service_id,DnsInfo}||DnsInfo<-DnsList,
 						       ApplicationId=:=DnsInfo#dns_info.service_id],
-    io:format(" stop_services ListWithIp  ~p~n",[{?MODULE,?LINE,ListWithIp}]),
+  %  io:format(" stop_services ListWithIp  ~p~n",[{?MODULE,?LINE,ListWithIp}]),
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
     _StopResult=do_stop(ListWithIp,{DnsIp,DnsPort},[]),
     NewDnsList=[Y_DnsInfo||Y_DnsInfo<-DnsList,
@@ -180,6 +182,8 @@ stop_applications([ApplicationId|T],DnsList,State)->
 
 do_stop([],_,StopResult)->
     StopResult;
+
+%% Glurk shoud be udated with kublete send and zone 
 do_stop([{IpAddr,Port,ApplicationId,DnsInfo}|T],{DnsIp,DnsPort},Acc)->
     Stop=ssl_lib:ssl_call([{IpAddr,Port}],{kubelet,stop_service,[ApplicationId]}),
     NewAcc=[{ApplicationId,{IpAddr,Port},Stop}|Acc],
@@ -194,18 +198,18 @@ do_stop([{IpAddr,Port,ApplicationId,DnsInfo}|T],{DnsIp,DnsPort},Acc)->
 %% --------------------------------------------------------------------
 which_to_stop(AppId,Vsn,NewAppList,JoscaInfo,State)->
     AllApplications=rpc:call(node(),controller_lib,needed_applications,[NewAppList,State]),
-   io:format(" AllApplications  ~p~n",[{?MODULE,?LINE,AllApplications}]),
+  % io:format(" AllApplications  ~p~n",[{?MODULE,?LINE,AllApplications}]),
 
 %   Get which applications that needs to be removed
     AppIdServices=rpc:call(node(),controller_lib,needed_applications,[[{{AppId,Vsn},JoscaInfo}],State]),
 
-   io:format(" AppIdServices  ~p~n",[{?MODULE,?LINE,AppIdServices}]),
+ %  io:format(" AppIdServices  ~p~n",[{?MODULE,?LINE,AppIdServices}]),
     
     ApplicationToStop=[X_ApplicationId||X_ApplicationId<-AppIdServices,
 					false==lists:member(X_ApplicationId,AllApplications)],
     ServicesToDeRegister=which_services_de_reg(ApplicationToStop,[]),
 %    io:format(" ApplicationToStop  ~p~n",[{?MODULE,?LINE,ApplicationToStop}]),
-    io:format(" ApplicationToStop,ServicesToDeRegister  ~p~n",[{?MODULE,?LINE,ApplicationToStop,ServicesToDeRegister}]),
+  %  io:format(" ApplicationToStop,ServicesToDeRegister  ~p~n",[{?MODULE,?LINE,ApplicationToStop,ServicesToDeRegister}]),
     {ApplicationToStop,ServicesToDeRegister}.
 
 
@@ -283,7 +287,9 @@ load_start_services(NeededServices,WantedNumInstances,State)->
     %% 5. Start missing instances, based on the updaetd nodelist 
     % 1.
     {dns,DnsIp,DnsPort}=State#state.dns_addr,
-    AllAvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
+    AllAvailableServices= kubelet:send("dns",?GetAllInstances()),
+
+    %AllAvailableServices=if_dns:call("dns",{dns,get_all_instances,[]},{DnsIp,DnsPort}),
   %  io:format(" AllAvailableServices  ~p~n",[{?MODULE,?LINE,AllAvailableServices}]),
     % 2.
     AlreadyAvailableServiceInstances=[{ServiceId,DnsInfo}||ServiceId<-NeededServices,
